@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HaremHeroes Automatic++
 // @namespace    https://github.com/Roukys/HHauto
-// @version      5.6.23
+// @version      5.6.23.0-beta
 // @description  Open the menu in HaremHeroes(topright) to toggle AutoControlls. Supports AutoSalary, AutoContest, AutoMission, AutoQuest, AutoTrollBattle, AutoArenaBattle and AutoPachinko(Free), AutoLeagues, AutoChampions and AutoStatUpgrades. Messages are printed in local console.
 // @author       JD and Dorten(a bit), Roukys, cossname, YotoTheOne, CLSchwab, deuxge
 // @match        http*://*.haremheroes.com/*
@@ -1941,129 +1941,143 @@ var CollectMoney = function()
         }
         else//nothing to collect
         {
-            var closestTime = undefined;
-            let st=Number(Storage().HHAuto_Setting_autoSalaryMinTimer);
-            var closestGirl = 0;
-            let salaryTimer =-1;
-            var gMap = getHHVars('GirlSalaryManager.girlsMap');
-            if(gMap === null)
+            let salaryTimer =predictNextSalaryMinTime();
+            if (salaryTimer > 0)
             {
-                // error
-                logHHAuto("Girls Map was undefined...! Error, manually setting salary time to 2 min.");
-                closestTime = st;
+                salaryTimer = predictNextSalaryMinTime();
+                logHHAuto("Setting salary timer to "+salaryTimer+" secs.");
             }
             else
             {
-                try{
-                    // Calc. closest time
-                    for(var key in gMap)
-                    {
-                        // undefined comparision is always false so first iteration is false, hence the not(!)
-                        if(!(closestTime<gMap[key].gData.pay_in) && !Clicked.includes(key) && gMap[key].gData.pay_in!=0)
-                        {
-                            closestTime = gMap[key].gData.pay_in;
-                            closestGirl = key;
-                        }
-                    }
-                }
-                catch(exp){
-                    // error
-                    logHHAuto("Catched error : Girls Map had undefined property...! Error, manually setting salary time to 2 min : "+exp);
-                    salaryTimer = st;
-                }
-            }
-            if(salaryTimer === -1 && closestTime === undefined)
-            {
-                logHHAuto("closestTime was undefined...! Error, manually setting salary time to 2 min.");
-                salaryTimer = st;
-            }
-
-            if (salaryTimer === -1)
-            {
-                if (allCollected)
-                {
-                    //set minimum to user min wait time
-                    if(closestTime <= st )
-                    {
-                        logHHAuto("Setting salary timer to player min wait of "+st+" secs.");
-                        salaryTimer = st;
-                    }
-                    else
-                    {
-                        logHHAuto("Next salary set to closest time : "+closestTime+" ("+closestGirl+")");
-                        salaryTimer = Number(closestTime)+1;
-                    }
-                }
-                else
-                {
-                    logHHAuto("Next salary set to 60 secs as remains girls to collect");
-                    salaryTimer = 60;
-                }
+                logHHAuto("Next salary set to 60 secs as remains girls to collect");
+                salaryTimer = 60;
             }
             setTimer('nextSalaryTime',salaryTimer);
-            gotoPage('home');
+            gotoPage("home",{},randomInterval(300,500));
         }
     }
 
     CollectData(true);
 }
 
+function predictNextSalaryMinTime(inGirlsDataList)
+{
+    let girlsDataList = getHHVars("GirlSalaryManager.girlsMap");
+    const isGirlMap = getHHVars("GirlSalaryManager.girlsMap")!==null;
+    if (!isGirlMap)
+    {
+        girlsDataList = ggetHHVars("girlsDataList");
+    }
+    let nextCollect = 0;
+    const minSalaryForCollect = Number(Storage().HHAuto_Setting_autoSalaryMinSalary);
+    let currentCollectSalary = 0;
+    if (girlsDataList !== null && minSalaryForCollect !== NaN)
+    {
+        let girlsSalary = Object.values(girlsDataList).sort(sortByPayIn);
+        for (let i of girlsSalary)
+        {
+            let girl = i;
+            if (isGirlMap)
+            {
+                girl = i.gData;
+            }
+            currentCollectSalary += girl.salary;
+            nextCollect = girl.pay_in;
+            if (currentCollectSalary > minSalaryForCollect)
+            {
+                break;
+            }
+        }
+    }
+    return nextCollect;
+
+    function sortByPayIn(a, b)
+    {
+        let aPay = a.pay_in?a.pay_in:a.gData.pay_in;
+        let bPay = b.pay_in?b.pay_in:b.gData.pay_in;
+        return aPay - bPay;
+    }
+}
+
 var getSalary = function () {
     try {
-        if(getPage() == "harem")
+        if(getPage() == "harem" || getPage() == "home")
         {
-            logHHAuto("Detected Harem Screen. Fetching Salary");
-            //replaceCheatClick();
-            sessionStorage.HHAuto_Temp_autoLoop = "false";
-            logHHAuto("setting autoloop to false");
-            CollectMoney();
-            // return busy
-            return true;
-        }
-        else if (getPage() == "home")
-        {
-            var salaryButton = $("#collect_all_container button[id='collect_all']")
-            var salaryToCollect = salaryButton.attr("style")==="display: inline-block;"?true:false;
-            var getButtonClass = salaryButton.attr("class");
-            if (salaryToCollect)
+            const salaryButton = $("#collect_all_container button[id='collect_all']")
+            const salaryToCollect = salaryButton.attr("style")==="display: inline-block;"?true:false;
+            const getButtonClass = salaryButton.attr("class");
+            let salarySumTag = NaN;
+            if (getPage() == "harem")
+            {
+                salarySumTag = Number($('[rel="next_salary"]',salaryButton)[0].innerText.replace(/[^0-9]/gi, ''));
+            }
+            else if (getPage() == "home")
+            {
+                salarySumTag = Number($('.sum',salaryButton).attr("amount"));
+            }
+
+            const enoughSalaryToCollect = salarySumTag === NaN?true:salarySumTag > Number(Storage().HHAuto_Setting_autoSalaryMinSalary);
+            //console.log(salarySumTag, enoughSalaryToCollect);
+            if (salaryToCollect && enoughSalaryToCollect )
             {
                 if (getButtonClass.indexOf("blue_button_L") !== -1 )
                 {
                     //replaceCheatClick();
                     salaryButton.click();
                     logHHAuto('Collected all Premium salary');
-                    setTimer('nextSalaryTime',Number(Storage().HHAuto_Setting_autoSalaryMinTimer)+1);
-                    return true;
+                    if (getPage() == "harem" )
+                    {
+                        setTimer('nextSalaryTime',predictNextSalaryMinTime());
+                        return false;
+                    }
+                    else
+                    {
+                        gotoPage("home");
+                        return true;
+                    }
+                    
                 }
                 else if ( getButtonClass.indexOf("orange_button_L") !== -1 )
                 {
                     // Not at Harem screen then goto the Harem screen.
-                    logHHAuto("Navigating to Harem window.");
-                    gotoPage("harem");
-                    // return busy
+                    if (getPage() == "harem" )
+                    {
+                        logHHAuto("Detected Harem Screen. Fetching Salary");
+                        //replaceCheatClick();
+                        sessionStorage.HHAuto_Temp_autoLoop = "false";
+                        logHHAuto("setting autoloop to false");
+                        CollectMoney();
+                    }
+                    else
+                    {
+                        logHHAuto("Navigating to Harem window.");
+                        gotoPage("harem");
+                    }
                     return true;
-
                 }
                 else
                 {
                     logHHAuto("Unknown salary button color : "+getButtonClass);
-                    setTimer('nextSalaryTime',Number(Storage().HHAuto_Setting_autoSalaryMinTimer)+1);
+                    setTimer('nextSalaryTime',60);
                 }
             }
             else
             {
-                logHHAuto("No salary to collect");
-                setTimer('nextSalaryTime',Number(Storage().HHAuto_Setting_autoSalaryMinTimer)+1);
+                logHHAuto("Not enough salary to collect");
+                setTimer('nextSalaryTime',predictNextSalaryMinTime());
             }
         }
         else
         {
             // Not at Harem screen then goto the Harem screen.
-            logHHAuto("Navigating to Home window.");
-            gotoPage("home");
-            return true;
+            if (checkTimer('nextSalaryTime'))
+            {
+                setTimer('nextSalaryTime',15*60);
+                logHHAuto("Navigating to Home window.");
+                gotoPage("home");
+                return true;
+            }
         }
-
     }
     catch (ex) {
         logHHAuto("Catched error : Could not collect salary... " + ex);
@@ -5713,7 +5727,7 @@ var autoLoop = function () {
         {
             sessionStorage.HHAuto_Temp_userLink = page;
         }
-        else if(sessionStorage.HHAuto_Temp_userLink !=="none" && busy === false && sessionStorage.HHAuto_Temp_autoLoop === "true")
+        else if(sessionStorage.HHAuto_Temp_userLink !=="none" && busy === false && sessionStorage.HHAuto_Temp_autoLoop === "true" && getPage() !== "home")
         {
             logHHAuto("Back to home page at the end of actions");
             //window.location = sessionStorage.HHAuto_Temp_userLink;
@@ -8660,13 +8674,14 @@ function getMenuValues()
                 switch (HHStoredVars[i].valueType)
                 {
                     case "Long Integer":
-                        menuValue = remove1000sSeparator(menuValue);
+                        menuValue = String(remove1000sSeparator(menuValue));
                         break;
                 }
                 //console.log(menuID,HHStoredVars[i].menuType,itemValue);
                 storageItem[i] = menuValue;
                 if (currentValue !== menuValue && HHStoredVars[i].newValueFunction !== undefined)
                 {
+                    //console.log(currentValue,menuValue);
                     HHStoredVars[i].newValueFunction.apply();
                 }
             }
@@ -9319,7 +9334,8 @@ HHAuto_ToolTips.en.showCalculatePower = { elementText: "Show PowerCalc", tooltip
 //HHAuto_ToolTips.en.calculatePowerLimits = { elementText: "Own limits", tooltip : "(red;orange)<br>Define your own red and orange limits for Opponents<br> -6000;0 do mean<br> <-6000 is red, between -6000 and 0 is orange and >=0 is green"};
 HHAuto_ToolTips.en.showInfo = { elementText: "Show info", tooltip : "if enabled : show info on script values and next runs"};
 HHAuto_ToolTips.en.autoSalary = { elementText: "Salary", tooltip : "(Integer)<br>if enabled :<br>Collect salaries every X secs"};
-HHAuto_ToolTips.en.autoSalaryMinTimer = { elementText: "Minimum wait", tooltip : "(Integer)<br>X secs to next Salary collection"};
+//HHAuto_ToolTips.en.autoSalaryMinTimer = { elementText: "Minimum wait", tooltip : "(Integer)<br>X secs to next Salary collection"};
+HHAuto_ToolTips.en.autoSalaryMinSalary = { elementText: "Min. salary", tooltip : "(Integer)<br>Minium salary to start collection"};
 HHAuto_ToolTips.en.autoSalaryMaxTimer = { elementText: "Max. collect time", tooltip : "(Integer)<br>X secs to collect Salary, before stopping."};
 HHAuto_ToolTips.en.autoMission = { elementText: "Mission", tooltip : "if enabled : Automatically do missions"};
 HHAuto_ToolTips.en.autoMissionCollect = { elementText: "Collect", tooltip : "if enabled : Automatically collect missions after start of new competition."};
@@ -9494,7 +9510,7 @@ HHAuto_ToolTips.fr.showCalculatePower = { elementText: "PowerCalc", tooltip : "S
 //HHAuto_ToolTips.fr.calculatePowerLimits = { elementText: "Limites perso", tooltip : "(rouge;orange)<br>Définissez vos propres limites de rouge et d'orange pour les opposants<br> -6000;0 veux dire<br> <-6000 est rouge, entre -6000 et 0 est orange et >=0 est vert"};
 HHAuto_ToolTips.fr.showInfo = { elementText: "Infos", tooltip : "Si activé : affiche une fenêtre d'informations sur le script."};
 HHAuto_ToolTips.fr.autoSalary = { elementText: "Salaire", tooltip : "Si activé :<br>Collecte les salaires toutes les X secondes."};
-HHAuto_ToolTips.fr.autoSalaryMinTimer = { elementText: "Attente min.", tooltip : "(Nombre entier)<br>Secondes d'attente minimum entre deux collectes."};
+//HHAuto_ToolTips.fr.autoSalaryMinTimer = { elementText: "Attente min.", tooltip : "(Nombre entier)<br>Secondes d'attente minimum entre deux collectes."};
 HHAuto_ToolTips.fr.autoMission = { elementText: "Missions", tooltip : "Si activé : lance automatiquement les missions."};
 HHAuto_ToolTips.fr.autoMissionCollect = { elementText: "Collecter", tooltip : "Si activé : collecte automatiquement les récompenses des missions."};
 HHAuto_ToolTips.fr.autoTrollBattle = { elementText: "Activer", tooltip : "Si activé : combat automatiquement le troll."};
@@ -9591,7 +9607,7 @@ HHAuto_ToolTips.de.showCalculatePower = { elementText: "Zeige Kraftrechner", too
 //HHAuto_ToolTips.de.calculatePowerLimits = { elementText: "Eigene Grenzen (rot;gelb)", tooltip : "(rot;gelb)<br>Definiere deine eigenen Grenzen für rote und orange Gegner<br> -6000;0 meint<br> <-6000 ist rot, zwischen -6000 und 0 ist orange und >=0 ist grün"};
 HHAuto_ToolTips.de.showInfo = { elementText: "Zeige Info", tooltip : "Wenn aktiv : zeige Information auf Skriptwerten und nächsten Durchläufen"};
 HHAuto_ToolTips.de.autoSalary = { elementText: "Auto Einkommen", tooltip : "Wenn aktiv :<br>Sammelt das gesamte Einkommen alle X Sek."};
-HHAuto_ToolTips.de.autoSalaryMinTimer = { elementText: "min Warten", tooltip : "(Ganze pos. Zahl)<br>X Sek bis zum Sammeln des Einkommens"};
+//HHAuto_ToolTips.de.autoSalaryMinTimer = { elementText: "min Warten", tooltip : "(Ganze pos. Zahl)<br>X Sek bis zum Sammeln des Einkommens"};
 HHAuto_ToolTips.de.autoMission = { elementText: "AutoMission", tooltip : "Wenn aktiv : Macht automatisch Missionen"};
 HHAuto_ToolTips.de.autoMissionCollect = { elementText: "Einsammeln", tooltip : "Wenn aktiv : Sammelt automatisch Missionsgewinne"};
 HHAuto_ToolTips.de.autoTrollBattle = { elementText: "AutoTrollKampf", tooltip : "Wenn aktiv : Macht automatisch aktivierte Trollkämpfe"};
@@ -9660,7 +9676,7 @@ HHAuto_ToolTips.es.showCalculatePower = { elementText: "Mostar PowerCalc", toolt
 //HHAuto_ToolTips.es.calculatePowerLimits = { elementText: "Límites propios (rojo;naranja)", tooltip : "(rojo;naranja)<br>Define tus propios límites rojos y naranjas para los oponentes<br> -6000;0 significa<br> <-6000 is rojo, entre -6000 and 0 is naranja and >=0 is verde"};
 HHAuto_ToolTips.es.showInfo = { elementText: "Muestra info", tooltip : "Si habilitado: muestra información de los valores del script y siguientes ejecuciones"};
 HHAuto_ToolTips.es.autoSalary = { elementText: "AutoSal.", tooltip : "(Entero)<br>Si habilitado:<br>Recauda salario cada X segundos"};
-HHAuto_ToolTips.es.autoSalaryMinTimer = { elementText: "min espera", tooltip : "(Entero)<br>X segundos para recaudar salario"};
+//HHAuto_ToolTips.es.autoSalaryMinTimer = { elementText: "min espera", tooltip : "(Entero)<br>X segundos para recaudar salario"};
 HHAuto_ToolTips.es.autoMission = { elementText: "AutoMision", tooltip : "Si habilitado: Juega misiones de manera automática"};
 HHAuto_ToolTips.es.autoMissionCollect = { elementText: "Recaudar", tooltip : "Si habilitado: Recauda misiones de manera automática"};
 HHAuto_ToolTips.es.autoTrollBattle = { elementText: "AutoVillano", tooltip : "Si habilitado: Combate villano seleccionado de manera automática"};
@@ -10111,7 +10127,11 @@ HHStoredVars.HHAuto_Setting_autoSalary =
     getMenu:true,
     setMenu:true,
     menuType:"checked",
-    kobanUsing:false
+    kobanUsing:false,
+    newValueFunction:function()
+    {
+        clearTimer('nextSalaryTime');
+    }
 };
 HHStoredVars.HHAuto_Setting_autoSalaryMaxTimer =
     {
@@ -10124,7 +10144,7 @@ HHStoredVars.HHAuto_Setting_autoSalaryMaxTimer =
     menuType:"value",
     kobanUsing:false
 };
-HHStoredVars.HHAuto_Setting_autoSalaryMinTimer =
+/*HHStoredVars.HHAuto_Setting_autoSalaryMinTimer =
     {
     default:"120",
     storage:"Storage()",
@@ -10134,6 +10154,21 @@ HHStoredVars.HHAuto_Setting_autoSalaryMinTimer =
     setMenu:true,
     menuType:"value",
     kobanUsing:false
+};*/
+HHStoredVars.HHAuto_Setting_autoSalaryMinSalary =
+    {
+    default:"20000",
+    storage:"Storage()",
+    HHType:"Setting",
+    valueType:"Long Integer",
+    getMenu:true,
+    setMenu:true,
+    menuType:"value",
+    kobanUsing:false,
+    newValueFunction:function()
+    {
+        clearTimer('nextSalaryTime');
+    }
 };
 HHStoredVars.HHAuto_Setting_autoSeason =
     {
@@ -11219,7 +11254,7 @@ var start = function () {
     +       '</div>'
     +      '</div>'
     +     '</div>' // end img and label
-    +     '<div class="labelAndButton"><span class="HHMenuItemName">'+getTextForUI("autoSalaryMinTimer","elementText")+'</span><div class="tooltipHH"><span class="tooltipHHtext">'+getTextForUI("autoSalaryMinTimer","tooltip")+'</span><input id="autoSalaryMinTimer" style="text-align:right; width:45px" required pattern="'+HHAuto_inputPattern.nWith1000sSeparator+'" type="text"></div></div>'
+    +     '<div class="labelAndButton"><span class="HHMenuItemName">'+getTextForUI("autoSalaryMinSalary","elementText")+'</span><div class="tooltipHH"><span class="tooltipHHtext">'+getTextForUI("autoSalaryMinSalary","tooltip")+'</span><input id="autoSalaryMinSalary" style="text-align:right; width:45px" required pattern="'+HHAuto_inputPattern.nWith1000sSeparator+'" type="text"></div></div>'
     +     '<div class="labelAndButton"><span class="HHMenuItemName">'+getTextForUI("autoSalaryMaxTimer","elementText")+'</span><div class="tooltipHH"><span class="tooltipHHtext">'+getTextForUI("autoSalaryMaxTimer","tooltip")+'</span><input id="autoSalaryMaxTimer" style="text-align:right; width:45px" required pattern="'+HHAuto_inputPattern.nWith1000sSeparator+'" type="text"></div></div>'
     +    '</div>'
     +   '</div>'
